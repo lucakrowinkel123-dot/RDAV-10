@@ -85,7 +85,9 @@
   string ExternalSourceName = "none";
   long ExternalTargetId = 0;
   long ExternalFeedLastSeenTick = 0;
+  long ExternalFeedLastTargetTick = 0;
   const long ExternalFeedTimeoutTicks = 180; //3 seconds at Update1
+  const long ExternalFeedTargetGraceTicks = 60; //1 second grace to avoid rapid target/no-target flicker
   IMyBroadcastListener ExternalTargetListener;
 
   //Shipside Required Blocks For Functionality
@@ -582,7 +584,7 @@
           int turns = ((quarterTurns % 4) + 4) % 4;
           for (int i = 0; i < turns; i++)
           {
-              // Screen-space uses (x, -z), so clockwise screen rotation is (z, -x) in local x/z terms.
+              // RDAV screen-space uses (x, -z); this quarter-turn mapping matches existing in-game calibration behaviour.
               float oldX = x;
               x = z;
               z = -oldX;
@@ -1340,6 +1342,8 @@
 
       ExternalFeedHasTarget = hasTargetInt == 1;
       ExternalFeedActive = true;
+      if (ExternalFeedHasTarget)
+      { ExternalFeedLastTargetTick = Runtime.LifetimeTicks; }
       ExternalTargetPosition = new Vector3D(tx, ty, tz);
       ExternalTargetVelocity = new Vector3D(tvx, tvy, tvz);
       ExternalSourcePosition = new Vector3D(sx, sy, sz);
@@ -1475,6 +1479,7 @@
       {
           ExternalFeedActive = false;
           ExternalFeedHasTarget = false;
+          ExternalFeedLastTargetTick = 0;
           ExternalSourceName = "stale";
       }
 
@@ -1482,7 +1487,8 @@
       bool HasTarget = ThisTracker.IsTracking; //If Turret Detects Enemy
 
       //Updates Track Location
-      if (ExternalFeedActive && ExternalFeedHasTarget)
+      bool externalHasTargetStable = ExternalFeedHasTarget || (ExternalFeedActive && ExternalFeedLastTargetTick > 0 && (Runtime.LifetimeTicks - ExternalFeedLastTargetTick) <= ExternalFeedTargetGraceTicks);
+      if (ExternalFeedActive && externalHasTargetStable)
       {
           HasTarget = true;
           TrackedTargetLocation = ExternalTargetPosition;
