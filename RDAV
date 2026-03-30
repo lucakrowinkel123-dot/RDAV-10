@@ -83,12 +83,28 @@
   Vector3D ExternalSourceForward = Vector3D.Forward;
   Vector3D ExternalSourceUp = Vector3D.Up;
   string ExternalSourceName = "none";
+  string ExternalSourceKey = "";
   long ExternalTargetId = 0;
   long ExternalFeedLastSeenTick = 0;
   long ExternalFeedLastTargetTick = 0;
   const long ExternalFeedTimeoutTicks = 180; //3 seconds at Update1
   const long ExternalFeedTargetGraceTicks = 60; //1 second grace to avoid rapid target/no-target flicker
   IMyBroadcastListener ExternalTargetListener;
+  class ExternalSourceState
+  {
+      public string SourceKey = "";
+      public string SourceName = "unknown";
+      public bool HasTarget;
+      public Vector3D TargetPosition = Vector3D.Zero;
+      public Vector3D TargetVelocity = Vector3D.Zero;
+      public Vector3D SourcePosition = Vector3D.Zero;
+      public Vector3D SourceForward = Vector3D.Forward;
+      public Vector3D SourceUp = Vector3D.Up;
+      public long TargetId;
+      public long LastSeenTick;
+      public long LastTargetTick;
+  }
+  Dictionary<string, ExternalSourceState> ExternalSources = new Dictionary<string, ExternalSourceState>();
 
   //Shipside Required Blocks For Functionality
   RadarTrackingModule ThisTracker;
@@ -1303,7 +1319,7 @@
   }
   #endregion
 
-  bool TryApplyExternalTargetPacket(string argument)
+  bool TryApplyExternalTargetPacket(string argument, long sourceEntityId = 0)
   {
       if (string.IsNullOrWhiteSpace(argument))
       { return false; }
@@ -1351,8 +1367,86 @@
       ExternalSourceUp = new Vector3D(sux, suy, suz);
       ExternalTargetId = parsedTargetId;
       ExternalSourceName = parts[13];
+      if (string.IsNullOrWhiteSpace(ExternalSourceName))
+      { ExternalSourceName = "unknown"; }
+      ExternalSourceKey = sourceEntityId != 0 ? (ExternalSourceName + "#" + sourceEntityId.ToString()) : ExternalSourceName;
       ExternalFeedLastSeenTick = Runtime.LifetimeTicks;
+
+      ExternalSourceState sourceState;
+      if (!ExternalSources.TryGetValue(ExternalSourceKey, out sourceState))
+      {
+          sourceState = new ExternalSourceState();
+          sourceState.SourceKey = ExternalSourceKey;
+          sourceState.SourceName = ExternalSourceName;
+          ExternalSources[ExternalSourceKey] = sourceState;
+      }
+      sourceState.HasTarget = ExternalFeedHasTarget;
+      sourceState.TargetPosition = ExternalTargetPosition;
+      sourceState.TargetVelocity = ExternalTargetVelocity;
+      sourceState.SourcePosition = ExternalSourcePosition;
+      sourceState.SourceForward = ExternalSourceForward;
+      sourceState.SourceUp = ExternalSourceUp;
+      sourceState.TargetId = ExternalTargetId;
+      sourceState.LastSeenTick = Runtime.LifetimeTicks;
+      if (ExternalFeedHasTarget)
+      { sourceState.LastTargetTick = Runtime.LifetimeTicks; }
       return true;
+  }
+
+  void ReconcileExternalSources()
+  {
+      List<string> staleSources = new List<string>();
+      foreach (var kv in ExternalSources)
+      {
+          if ((Runtime.LifetimeTicks - kv.Value.LastSeenTick) > ExternalFeedTimeoutTicks)
+          { staleSources.Add(kv.Key); }
+      }
+      foreach (var stale in staleSources)
+      { ExternalSources.Remove(stale); }
+
+      ExternalSourceState best = null;
+      foreach (var kv in ExternalSources)
+      {
+          var candidate = kv.Value;
+          bool candidateHasStableTarget = candidate.HasTarget || (candidate.LastTargetTick > 0 && (Runtime.LifetimeTicks - candidate.LastTargetTick) <= ExternalFeedTargetGraceTicks);
+          if (best == null)
+          {
+              best = candidate;
+              continue;
+          }
+
+          bool bestHasStableTarget = best.HasTarget || (best.LastTargetTick > 0 && (Runtime.LifetimeTicks - best.LastTargetTick) <= ExternalFeedTargetGraceTicks);
+          if (candidateHasStableTarget && !bestHasStableTarget)
+          {
+              best = candidate;
+              continue;
+          }
+          if (candidateHasStableTarget == bestHasStableTarget && candidate.LastSeenTick > best.LastSeenTick)
+          { best = candidate; }
+      }
+
+      if (best == null)
+      {
+          ExternalFeedActive = false;
+          ExternalFeedHasTarget = false;
+          ExternalFeedLastTargetTick = 0;
+          ExternalSourceName = "stale";
+          ExternalSourceKey = "";
+          return;
+      }
+
+      ExternalFeedActive = true;
+      ExternalFeedHasTarget = best.HasTarget;
+      ExternalTargetPosition = best.TargetPosition;
+      ExternalTargetVelocity = best.TargetVelocity;
+      ExternalSourcePosition = best.SourcePosition;
+      ExternalSourceForward = best.SourceForward;
+      ExternalSourceUp = best.SourceUp;
+      ExternalTargetId = best.TargetId;
+      ExternalSourceName = best.SourceName;
+      ExternalSourceKey = best.SourceKey;
+      ExternalFeedLastSeenTick = best.LastSeenTick;
+      ExternalFeedLastTargetTick = best.LastTargetTick;
   }
 
   void ApplyTagSettingsFromProgrammableBlockName()
@@ -1396,7 +1490,7 @@
           if (string.IsNullOrWhiteSpace(payload))
           { continue; }
 
-          if (TryApplyExternalTargetPacket(payload))
+          if (TryApplyExternalTargetPacket(payload, message.Source))
           { applied = true; }
       }
       return applied;
@@ -1474,14 +1568,8 @@
       //Updates Tracking System
       ThisTracker.UpdateTracking(Runtime.LifetimeTicks); //DateTime.Now.Ticks
 
-      //Drops stale external feeds so old remote locks do not persist forever.
-      if (ExternalFeedActive && (Runtime.LifetimeTicks - ExternalFeedLastSeenTick) > ExternalFeedTimeoutTicks)
-      {
-          ExternalFeedActive = false;
-          ExternalFeedHasTarget = false;
-          ExternalFeedLastTargetTick = 0;
-          ExternalSourceName = "stale";
-      }
+      //Drops stale external feeds and selects the strongest recent source.
+      ReconcileExternalSources();
 
       //Toggles LockOn
       bool HasTarget = ThisTracker.IsTracking; //If Turret Detects Enemy
@@ -1597,6 +1685,23 @@
 
                   runtimeAgs.ToDisplay.Add(targetInfo);
               }
+          }
+
+          //Adds other remote sources to radar so operators can see scout positions.
+          foreach (var kv in ExternalSources)
+          {
+              ExternalSourceState source = kv.Value;
+              if ((Runtime.LifetimeTicks - source.LastSeenTick) > ExternalFeedTimeoutTicks)
+              { continue; }
+              if (source.SourceKey == ExternalSourceKey)
+              { continue; } //current source is represented by the radar reference marker
+
+              TrackingDisplay.TargetInfo sourceInfo = new TrackingDisplay.TargetInfo();
+              sourceInfo.RenderColour = Color.LimeGreen;
+              sourceInfo.Location = source.SourcePosition;
+              sourceInfo.Velocity = Vector3D.Zero;
+              sourceInfo.DrawDirectionLine = false;
+              runtimeAgs.ToDisplay.Add(sourceInfo);
           }
 
           //Adds Target (If Tracking)
