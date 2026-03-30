@@ -582,9 +582,10 @@
           int turns = ((quarterTurns % 4) + 4) % 4;
           for (int i = 0; i < turns; i++)
           {
+              // Screen-space uses (x, -z), so clockwise screen rotation is (-z, x) in local x/z terms.
               float oldX = x;
-              x = z;
-              z = -oldX;
+              x = -z;
+              z = oldX;
           }
       }
 
