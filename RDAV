@@ -593,12 +593,16 @@
           radarRight = Vector3D.Normalize(radarRight);
 
           Vector3D relative = Location - referenceLocation;
-          float localX = (float)Vector3D.Dot(relative, radarRight);
-          float localZ = (float)Vector3D.Dot(relative, radarForward);
+          float rawX = (float)Vector3D.Dot(relative, radarRight);
+          float rawZ = (float)Vector3D.Dot(relative, radarForward);
+          float localX = legacyHandedness ? rawX : -rawZ;
+          float localZ = legacyHandedness ? rawZ : rawX;
           LocationScreenspace = RadarCenter + new Vector2(localX, -localZ) * screenUnitsPerMeter;
 
-          float velocityX = (float)Vector3D.Dot(Velocity, radarRight);
-          float velocityZ = (float)Vector3D.Dot(Velocity, radarForward);
+          float rawVelocityX = (float)Vector3D.Dot(Velocity, radarRight);
+          float rawVelocityZ = (float)Vector3D.Dot(Velocity, radarForward);
+          float velocityX = legacyHandedness ? rawVelocityX : -rawVelocityZ;
+          float velocityZ = legacyHandedness ? rawVelocityZ : rawVelocityX;
           Vector3D localVelocity = new Vector3D(velocityX, 0, velocityZ);
 
           // Create direction marker (small offset)
@@ -624,6 +628,7 @@
           public Vector3D Location;
           public Vector3D Velocity;
           public Color RenderColour;
+          public bool DrawDirectionLine;
       }
 
       public struct RuntimeAgs
@@ -665,7 +670,8 @@
                   Vector2 Squarelocation, Squarepointpos;
                   ProjectToPlane(args.ReferenceLocation, args.ReferenceForwards, args.ReferenceUpwards, args.UseLegacyHandedness, item.Location, item.Velocity, out Squarelocation, out Squarepointpos);
                   renderableSprites.Add(DrawCircle(Squarelocation, 0.0085f, item.RenderColour, true));
-                  renderableSprites.Add(DrawLine(Squarelocation, Squarepointpos, 0.0035f, item.RenderColour));
+                  if (item.DrawDirectionLine)
+                  { renderableSprites.Add(DrawLine(Squarelocation, Squarepointpos, 0.0035f, item.RenderColour)); }
               }
 
               //Renders Information GUI
@@ -1561,6 +1567,7 @@
                   targetInfo.RenderColour = Color.RoyalBlue;
                   targetInfo.Location = missile.WorldLocation;
                   targetInfo.Velocity = missile.WorldVelocity * 30;
+                  targetInfo.DrawDirectionLine = false;
 
                   runtimeAgs.ToDisplay.Add(targetInfo);
               }
@@ -1573,6 +1580,7 @@
                   targetInfo.RenderColour = Color.Red;
                   targetInfo.Location = TrackedTargetLocation;
                   targetInfo.Velocity = TrackedTargetVelocity * 30;
+                  targetInfo.DrawDirectionLine = true;
 
                   runtimeAgs.ToDisplay.Add(targetInfo);
               }
