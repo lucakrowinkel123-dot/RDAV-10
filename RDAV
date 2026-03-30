@@ -595,14 +595,14 @@
           Vector3D relative = Location - referenceLocation;
           float rawX = (float)Vector3D.Dot(relative, radarRight);
           float rawZ = (float)Vector3D.Dot(relative, radarForward);
-          float localX = legacyHandedness ? rawX : rawZ;
-          float localZ = legacyHandedness ? rawZ : -rawX;
+          float localX = rawX;
+          float localZ = rawZ;
           LocationScreenspace = RadarCenter + new Vector2(localX, -localZ) * screenUnitsPerMeter;
 
           float rawVelocityX = (float)Vector3D.Dot(Velocity, radarRight);
           float rawVelocityZ = (float)Vector3D.Dot(Velocity, radarForward);
-          float velocityX = legacyHandedness ? rawVelocityX : rawVelocityZ;
-          float velocityZ = legacyHandedness ? rawVelocityZ : -rawVelocityX;
+          float velocityX = rawVelocityX;
+          float velocityZ = rawVelocityZ;
           Vector3D localVelocity = new Vector3D(velocityX, 0, velocityZ);
 
           // Create direction marker (small offset)
