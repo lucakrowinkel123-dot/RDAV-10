@@ -51,6 +51,7 @@
   const bool UseDefaultTargeting = false; // set this to true to enable 'default' targeting subsystems by default
   const bool RenameCockpit = true; //Renames the cockpit the script uses to help  diagnose issues
   const int MissileLCD = 0; //LCD in the cockpit to use (keep this 0 unless you want it on a different screen)
+  const int LocalRadarRotationQuarterTurnsCW = 1; //local radar calibration: 0=none,1=90° CW,2=180°,3=270° CW
   int GravityAggressiveness = 5; //Auto-selected from PB tag: #A#=5, #B#=6, #C#=7, #D#=8
 
   bool Autoconnect = true;//Automatically connects missile connectors so its easier to use in survival
@@ -576,8 +577,19 @@
           return frame;
       }
 
+      void RotateQuarterTurnsCW(ref float x, ref float z, int quarterTurns)
+      {
+          int turns = ((quarterTurns % 4) + 4) % 4;
+          for (int i = 0; i < turns; i++)
+          {
+              float oldX = x;
+              x = z;
+              z = -oldX;
+          }
+      }
+
       //Projecting Code
-      public void ProjectToPlane(Vector3D referenceLocation, Vector3D referenceForward, Vector3D referenceUp, bool legacyHandedness, Vector3D Location, Vector3D Velocity, out Vector2 LocationScreenspace, out Vector2 velocityindicatorlocationSceenspace)
+      public void ProjectToPlane(Vector3D referenceLocation, Vector3D referenceForward, Vector3D referenceUp, bool legacyHandedness, int localRotationQuarterTurnsCW, Vector3D Location, Vector3D Velocity, out Vector2 LocationScreenspace, out Vector2 velocityindicatorlocationSceenspace)
       {
           const float pixelsPerMeter = 0.5f * 0.16f;
           const float screenUnitsPerMeter = pixelsPerMeter / 512.0f;
@@ -597,12 +609,19 @@
           float rawZ = (float)Vector3D.Dot(relative, radarForward);
           float localX = rawX;
           float localZ = rawZ;
-          LocationScreenspace = RadarCenter + new Vector2(localX, -localZ) * screenUnitsPerMeter;
 
           float rawVelocityX = (float)Vector3D.Dot(Velocity, radarRight);
           float rawVelocityZ = (float)Vector3D.Dot(Velocity, radarForward);
           float velocityX = rawVelocityX;
           float velocityZ = rawVelocityZ;
+
+          if (!legacyHandedness)
+          {
+              RotateQuarterTurnsCW(ref localX, ref localZ, localRotationQuarterTurnsCW);
+              RotateQuarterTurnsCW(ref velocityX, ref velocityZ, localRotationQuarterTurnsCW);
+          }
+
+          LocationScreenspace = RadarCenter + new Vector2(localX, -localZ) * screenUnitsPerMeter;
           Vector3D localVelocity = new Vector3D(velocityX, 0, velocityZ);
 
           // Create direction marker (small offset)
@@ -639,6 +658,7 @@
           public Vector3D ReferenceMarkerLocation;
           public bool DrawReferenceMarker;
           public bool UseLegacyHandedness;
+          public int LocalRotationQuarterTurnsCW;
 
           public List<TargetInfo> ToDisplay;
 
@@ -668,7 +688,7 @@
               foreach (var item in args.ToDisplay)
               {
                   Vector2 Squarelocation, Squarepointpos;
-                  ProjectToPlane(args.ReferenceLocation, args.ReferenceForwards, args.ReferenceUpwards, args.UseLegacyHandedness, item.Location, item.Velocity, out Squarelocation, out Squarepointpos);
+                  ProjectToPlane(args.ReferenceLocation, args.ReferenceForwards, args.ReferenceUpwards, args.UseLegacyHandedness, args.LocalRotationQuarterTurnsCW, item.Location, item.Velocity, out Squarelocation, out Squarepointpos);
                   renderableSprites.Add(DrawCircle(Squarelocation, 0.0085f, item.RenderColour, true));
                   if (item.DrawDirectionLine)
                   { renderableSprites.Add(DrawLine(Squarelocation, Squarepointpos, 0.0035f, item.RenderColour)); }
@@ -678,7 +698,7 @@
               if (args.DrawReferenceMarker)
               {
                   Vector2 sourcelocation, sourcepointpos;
-                  ProjectToPlane(args.ReferenceLocation, args.ReferenceForwards, args.ReferenceUpwards, args.UseLegacyHandedness, args.ReferenceMarkerLocation, Vector3D.Zero, out sourcelocation, out sourcepointpos);
+                  ProjectToPlane(args.ReferenceLocation, args.ReferenceForwards, args.ReferenceUpwards, args.UseLegacyHandedness, args.LocalRotationQuarterTurnsCW, args.ReferenceMarkerLocation, Vector3D.Zero, out sourcelocation, out sourcepointpos);
                   Vector2 radarCenter = new Vector2(0.5f, 0.5f) + new Vector2(0, -16) / 512.0f;
                   const float radarRadius = 200f / 512f;
                   Vector2 sourceOffset = sourcelocation - radarCenter;
@@ -1550,6 +1570,7 @@
           runtimeAgs.ReferenceMarkerLocation = ExternalFeedActive ? RC.GetPosition() : runtimeAgs.ReferenceLocation;
           runtimeAgs.DrawReferenceMarker = true;
           runtimeAgs.UseLegacyHandedness = ExternalFeedActive;
+          runtimeAgs.LocalRotationQuarterTurnsCW = LocalRadarRotationQuarterTurnsCW;
           runtimeAgs.TargetLock = HasTarget;
           runtimeAgs.Targetmode = "RDAR";
           runtimeAgs.Targetinfoline1 = ThisTracker.GetLine1Info();
