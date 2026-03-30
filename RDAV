@@ -577,7 +577,7 @@
       }
 
       //Projecting Code
-      public void ProjectToPlane(Vector3D referenceLocation, Vector3D referenceForward, Vector3D referenceUp, Vector3D Location, Vector3D Velocity, out Vector2 LocationScreenspace, out Vector2 velocityindicatorlocationSceenspace)
+      public void ProjectToPlane(Vector3D referenceLocation, Vector3D referenceForward, Vector3D referenceUp, bool legacyHandedness, Vector3D Location, Vector3D Velocity, out Vector2 LocationScreenspace, out Vector2 velocityindicatorlocationSceenspace)
       {
           const float pixelsPerMeter = 0.5f * 0.16f;
           const float screenUnitsPerMeter = pixelsPerMeter / 512.0f;
@@ -585,20 +585,24 @@
 
           Vector3D radarForward = referenceForward.LengthSquared() > 0.0001 ? Vector3D.Normalize(referenceForward) : Vector3D.Forward;
           Vector3D radarUp = referenceUp.LengthSquared() > 0.0001 ? Vector3D.Normalize(referenceUp) : Vector3D.Up;
-          Vector3D radarRight = Vector3D.Cross(radarForward, radarUp);
+          Vector3D radarRight = legacyHandedness ? Vector3D.Cross(radarForward, radarUp) : Vector3D.Cross(radarUp, radarForward);
           if (radarRight.LengthSquared() < 0.0001)
           {
-              radarRight = Vector3D.Cross(Vector3D.Forward, radarUp);
+              radarRight = legacyHandedness ? Vector3D.Cross(Vector3D.Forward, radarUp) : Vector3D.Cross(radarUp, Vector3D.Forward);
           }
           radarRight = Vector3D.Normalize(radarRight);
 
           Vector3D relative = Location - referenceLocation;
-          float localX = (float)Vector3D.Dot(relative, radarRight);
-          float localZ = (float)Vector3D.Dot(relative, radarForward);
+          float rawX = (float)Vector3D.Dot(relative, radarRight);
+          float rawZ = (float)Vector3D.Dot(relative, radarForward);
+          float localX = rawX;
+          float localZ = rawZ;
           LocationScreenspace = RadarCenter + new Vector2(localX, -localZ) * screenUnitsPerMeter;
 
-          float velocityX = (float)Vector3D.Dot(Velocity, radarRight);
-          float velocityZ = (float)Vector3D.Dot(Velocity, radarForward);
+          float rawVelocityX = (float)Vector3D.Dot(Velocity, radarRight);
+          float rawVelocityZ = (float)Vector3D.Dot(Velocity, radarForward);
+          float velocityX = rawVelocityX;
+          float velocityZ = rawVelocityZ;
           Vector3D localVelocity = new Vector3D(velocityX, 0, velocityZ);
 
           // Create direction marker (small offset)
@@ -624,6 +628,7 @@
           public Vector3D Location;
           public Vector3D Velocity;
           public Color RenderColour;
+          public bool DrawDirectionLine;
       }
 
       public struct RuntimeAgs
@@ -633,6 +638,7 @@
           public Vector3D ReferenceUpwards;
           public Vector3D ReferenceMarkerLocation;
           public bool DrawReferenceMarker;
+          public bool UseLegacyHandedness;
 
           public List<TargetInfo> ToDisplay;
 
@@ -662,17 +668,17 @@
               foreach (var item in args.ToDisplay)
               {
                   Vector2 Squarelocation, Squarepointpos;
-                  ProjectToPlane(args.ReferenceLocation, args.ReferenceForwards, args.ReferenceUpwards, item.Location, item.Velocity, out Squarelocation, out Squarepointpos);
-                  renderableSprites.Add(DrawRectangle_FromCntr(Squarelocation, 0.025f, 0.025f, item.RenderColour, true));
-                  renderableSprites.Add(DrawLine(Squarelocation, Squarepointpos, 0.005f, item.RenderColour));
-                  renderableSprites.Add(DrawText(item.Velocity.Length().ToString("F1"), Squarelocation + new Vector2(0.02f, -0.04f), item.RenderColour, 0.5f, TextAlignment.LEFT));
+                  ProjectToPlane(args.ReferenceLocation, args.ReferenceForwards, args.ReferenceUpwards, args.UseLegacyHandedness, item.Location, item.Velocity, out Squarelocation, out Squarepointpos);
+                  renderableSprites.Add(DrawCircle(Squarelocation, 0.0085f, item.RenderColour, true));
+                  if (item.DrawDirectionLine)
+                  { renderableSprites.Add(DrawLine(Squarelocation, Squarepointpos, 0.0035f, item.RenderColour)); }
               }
 
               //Renders Information GUI
               if (args.DrawReferenceMarker)
               {
                   Vector2 sourcelocation, sourcepointpos;
-                  ProjectToPlane(args.ReferenceLocation, args.ReferenceForwards, args.ReferenceUpwards, args.ReferenceMarkerLocation, Vector3D.Zero, out sourcelocation, out sourcepointpos);
+                  ProjectToPlane(args.ReferenceLocation, args.ReferenceForwards, args.ReferenceUpwards, args.UseLegacyHandedness, args.ReferenceMarkerLocation, Vector3D.Zero, out sourcelocation, out sourcepointpos);
                   Vector2 radarCenter = new Vector2(0.5f, 0.5f) + new Vector2(0, -16) / 512.0f;
                   const float radarRadius = 200f / 512f;
                   Vector2 sourceOffset = sourcelocation - radarCenter;
@@ -1543,6 +1549,7 @@
           runtimeAgs.ReferenceUpwards = localRadarUp;
           runtimeAgs.ReferenceMarkerLocation = ExternalFeedActive ? RC.GetPosition() : runtimeAgs.ReferenceLocation;
           runtimeAgs.DrawReferenceMarker = true;
+          runtimeAgs.UseLegacyHandedness = ExternalFeedActive;
           runtimeAgs.TargetLock = HasTarget;
           runtimeAgs.Targetmode = "RDAR";
           runtimeAgs.Targetinfoline1 = ThisTracker.GetLine1Info();
@@ -1560,6 +1567,7 @@
                   targetInfo.RenderColour = Color.RoyalBlue;
                   targetInfo.Location = missile.WorldLocation;
                   targetInfo.Velocity = missile.WorldVelocity * 30;
+                  targetInfo.DrawDirectionLine = false;
 
                   runtimeAgs.ToDisplay.Add(targetInfo);
               }
@@ -1572,6 +1580,7 @@
                   targetInfo.RenderColour = Color.Red;
                   targetInfo.Location = TrackedTargetLocation;
                   targetInfo.Velocity = TrackedTargetVelocity * 30;
+                  targetInfo.DrawDirectionLine = true;
 
                   runtimeAgs.ToDisplay.Add(targetInfo);
               }
